@@ -4,6 +4,23 @@ A customized PBRT-v4 project for wave-optics-based hair rendering using NS-FDTD 
 
 This repository contains a customized version of [PBRT-v4](https://github.com/mmp/pbrt-v4) for wave-optics-based hair rendering, as part of my undergraduate thesis. The project implements a scattering model for hair fibers based on wave optics principles, simulated using the Non-Standard Finite-Difference Time-Domain (NS-FDTD) method. It also integrates precomputed BxDF tables for efficient rendering.
 
+## Third-Party Libraries
+
+PBRT-v4 makes use of the following third-party libraries and data.  
+Thanks to all of the developers who have made these available!
+
+- [double-conversion](https://github.com/google/double-conversion)  
+- [filesystem](https://github.com/wjakob/filesystem)  
+- [googletest](https://github.com/google/googletest)  
+- [lodepng](https://lodev.org/lodepng/)  
+- [OpenEXR](http://www.openexr.com)  
+- [Ptex](http://ptex.us/)  
+- [rply](http://w3.impa.br/~diego/software/rply/)  
+- [skymodel](https://cgg.mff.cuni.cz/projects/SkylightModelling/)  
+- [stb](https://github.com/nothings/stb)  
+- [tinyobjloader](https://github.com/tinyobjloader/tinyobjloader)  
+- [zlib](https://zlib.net/)
+
 ## Installation
 
 1. Cloning the Repository

@@ -6,7 +6,6 @@
 #define PBRT_MATERIALS_H
 
 #include <pbrt/pbrt.h>
-
 #include <pbrt/base/bssrdf.h>
 #include <pbrt/base/material.h>
 #include <pbrt/bsdf.h>
@@ -21,6 +20,9 @@
 #include <memory>
 #include <string>
 #include <type_traits>
+
+// 引入BRDF表数据
+#include "table/brdfTable.h"
 
 namespace pbrt {
 
@@ -424,6 +426,103 @@ class HairMaterial {
     SpectrumTexture sigma_a, color;
     FloatTexture eumelanin, pheomelanin, eta;
     FloatTexture beta_m, beta_n, alpha;
+};
+
+// MorphoMaterial Definition（基于 HairMaterial 的材质模型）
+class MorphoMaterial {
+  public:
+    using BxDF = MorphoBSDF; // 使用 MorphoBSDF 作为该材质的双向散射分布函数类型
+    using BSSRDF = void;     // 不支持次表面散射（Subsurface Scattering）
+
+    // MorphoMaterial Public Methods
+        // 初始化所有材质属性纹理
+    MorphoMaterial(SpectrumTexture sigma_a, 
+                   SpectrumTexture color, 
+                   FloatTexture eumelanin,
+                   FloatTexture pheomelanin, 
+                   FloatTexture eta, 
+                   FloatTexture beta_m,
+                   FloatTexture beta_n, 
+                   FloatTexture alpha)
+        : sigma_a(sigma_a),
+          color(color),
+          eumelanin(eumelanin),
+          pheomelanin(pheomelanin),
+          eta(eta),
+          beta_m(beta_m),
+          beta_n(beta_n),
+          alpha(alpha) {}
+
+    static const char *Name() { return "MorphoMaterial"; }
+
+    // 判断是否可以评估所有关联纹理（用于提前优化或光谱采样检查）
+    template <typename TextureEvaluator>
+    PBRT_CPU_GPU bool CanEvaluateTextures(TextureEvaluator texEval) const {
+        return texEval.CanEvaluate({eumelanin, pheomelanin, eta, beta_m, beta_n, alpha},
+                                   {sigma_a, color});
+    }
+
+    // 返回此材质的 BxDF（用于表面反射建模）
+    template <typename TextureEvaluator>
+    PBRT_CPU_GPU MorphoBSDF GetBxDF(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                    SampledWavelengths &lambda) const {
+        // 限制 beta_m 和 beta_n 的值域在 [1e-2, 1.0]
+        Float bm = std::max<Float>(1e-2, std::min<Float>(1.0, texEval(beta_m, ctx)));
+        Float bn = std::max<Float>(1e-2, std::min<Float>(1.0, texEval(beta_n, ctx)));
+        Float a = texEval(alpha, ctx);  // alpha 用于控制鳞片密度或偏移等
+        Float e = texEval(eta, ctx);    // eta 是折射率
+
+        SampledSpectrum sig_a; // 吸收系数
+        if (sigma_a)
+            // 直接从纹理评估得到吸收系数
+            sig_a = ClampZero(texEval(sigma_a, ctx, lambda));
+        else if (color) {
+            // 通过颜色反射率推导吸收系数
+            SampledSpectrum c = Clamp(texEval(color, ctx, lambda), 0, 1);
+            sig_a = MorphoBSDF::SigmaAFromReflectance(c, bn, lambda);
+        } else {
+            // 通过黑色素浓度推导吸收系数（默认模式）
+            CHECK(eumelanin || pheomelanin);
+            sig_a = MorphoBSDF::SigmaAFromConcentration(
+                        std::max(Float(0), eumelanin ? texEval(eumelanin, ctx) : 0),
+                        std::max(Float(0), pheomelanin ? texEval(pheomelanin, ctx) : 0))
+                        .Sample(lambda);
+        }
+
+        // Offset along width (similar to HairMaterial)
+            // 沿着鳞片宽度的偏移量（类似于头发模型中 h 的定义）
+        Float h = -1 + 2 * ctx.uv[1];
+        return MorphoBSDF(h, e, sig_a, bm, bn, a, /* wavelengthIndex = */ 0);
+    }
+
+    // 从参数字典构建 MorphoMaterial 实例
+    static MorphoMaterial *Create(const TextureParameterDictionary &parameters,
+                                  const FileLoc *loc, Allocator alloc);
+
+    // 返回位移纹理（本模型不使用位移贴图）
+    PBRT_CPU_GPU
+    FloatTexture GetDisplacement() const { return nullptr; }
+
+    // 返回法线贴图（本模型不使用法线贴图）
+    PBRT_CPU_GPU
+    const Image *GetNormalMap() const { return nullptr; }
+
+    // 获取 BSSRDF（未实现，留空）
+    template <typename TextureEvaluator>
+    PBRT_CPU_GPU void GetBSSRDF(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                SampledWavelengths &lambda) const {}
+    PBRT_CPU_GPU static constexpr bool HasSubsurfaceScattering() { return false; }
+
+    std::string ToString() const;
+
+  private:
+    // MorphoMaterial Private Data
+        // 私有数据成员：材质参数纹理
+    SpectrumTexture sigma_a, color;         // 吸收系数或颜色
+    FloatTexture eumelanin, pheomelanin;    // 黑色素和黄色素浓度
+    FloatTexture eta;                       // 折射率
+    FloatTexture beta_m, beta_n;            // 微观结构参数（例如：鳞片倾角、粗糙度等）
+    FloatTexture alpha;                     // 鳞片覆盖密度或旋转控制参数
 };
 
 // DiffuseMaterial Definition
@@ -914,7 +1013,7 @@ inline BSDF Material::GetBSDF(TextureEvaluator texEval, MaterialEvalContext ctx,
 }
 
 template <typename TextureEvaluator>
-PBRT_CPU_GPU inline bool Material::CanEvaluateTextures(TextureEvaluator texEval) const {
+inline bool Material::CanEvaluateTextures(TextureEvaluator texEval) const {
     auto eval = [&](auto ptr) { return ptr->CanEvaluateTextures(texEval); };
     return Dispatch(eval);
 }
@@ -937,17 +1036,17 @@ inline BSSRDF Material::GetBSSRDF(TextureEvaluator texEval, MaterialEvalContext 
     return DispatchCPU(get);
 }
 
-PBRT_CPU_GPU inline bool Material::HasSubsurfaceScattering() const {
+inline bool Material::HasSubsurfaceScattering() const {
     auto has = [&](auto ptr) { return ptr->HasSubsurfaceScattering(); };
     return Dispatch(has);
 }
 
-PBRT_CPU_GPU inline FloatTexture Material::GetDisplacement() const {
+inline FloatTexture Material::GetDisplacement() const {
     auto disp = [&](auto ptr) { return ptr->GetDisplacement(); };
     return Dispatch(disp);
 }
 
-PBRT_CPU_GPU inline const Image *Material::GetNormalMap() const {
+inline const Image *Material::GetNormalMap() const {
     auto nmap = [&](auto ptr) { return ptr->GetNormalMap(); };
     return Dispatch(nmap);
 }

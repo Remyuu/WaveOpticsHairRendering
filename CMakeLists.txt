@@ -583,6 +583,8 @@ set (PBRT_SOURCE_HEADERS
   src/pbrt/scene.h
   src/pbrt/shapes.h
   src/pbrt/textures.h
+
+  src/pbrt/table/brdfTable.h
   )  
 
 SET (PBRT_CPU_SOURCE
@@ -851,6 +853,14 @@ add_library (pbrt_lib STATIC
   src/ext/gtest/gtest-all.cc
   src/ext/lodepng/lodepng.cpp
   src/ext/rply/rply.cpp
+
+  # BRDF-related table source files
+  src/pbrt/table/brdf_c5.cpp
+  src/pbrt/table/brdf_ck5.cpp
+  src/pbrt/table/brdf_hk5.cpp
+  src/pbrt/table/brdf_hkck5.cpp
+  src/pbrt/table/brdfTable.cpp
+
   )
 add_library (pbrt::pbrt_lib ALIAS pbrt_lib)
 

@@ -24,6 +24,9 @@
 #include <limits>
 #include <string>
 
+// 引入用于BRDF计算的表格数据
+#include "table/brdfTable.h"
+
 namespace pbrt {
 
 // DiffuseBxDF Definition
@@ -917,7 +920,7 @@ class CoatedConductorBxDF : public LayeredBxDF<DielectricBxDF, ConductorBxDF, tr
     using LayeredBxDF::LayeredBxDF;
 };
 
-// HairBxDF Definition
+// HairBxDF Definition（头发材质的反射模型）
 class HairBxDF {
   public:
     // HairBxDF Public Methods
@@ -925,18 +928,26 @@ class HairBxDF {
     PBRT_CPU_GPU
     HairBxDF(Float h, Float eta, const SampledSpectrum &sigma_a, Float beta_m,
              Float beta_n, Float alpha);
-    PBRT_CPU_GPU
+    PBRT_CPU_GPU // 计算头发材质的反射或散射光谱（入射光与出射光的方向和传输模式决定）
     SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode) const;
-    PBRT_CPU_GPU
+
+    // wo: 出射方向的向量；wi: 入射方向的向量；mode: 传输模式（放射模式或重要性采样模式）
+    // 计算头发的反射或散射光谱（颜色和强度）
+    
+    PBRT_CPU_GPU // 使用随机数 (uc, u) 进行头发材质的反射或散射方向的采样
     pstd::optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u,
                                         TransportMode mode,
                                         BxDFReflTransFlags sampleFlags) const;
-    PBRT_CPU_GPU
+    
+    PBRT_CPU_GPU // 计算特定方向的反射或散射的概率密度函数（PDF）
     Float PDF(Vector3f wo, Vector3f wi, TransportMode mode,
               BxDFReflTransFlags sampleFlags) const;
 
+    //光が特定の方向に反射または散乱する確率を計算します。
+
     PBRT_CPU_GPU
     void Regularize() {}
+    // 该方法目前不执行任何操作，但将来可能用于对头发物理特性进行正则化处理
 
     PBRT_CPU_GPU
     static constexpr const char *Name() { return "HairBxDF"; }
@@ -947,15 +958,17 @@ class HairBxDF {
 
     PBRT_CPU_GPU
     static RGBUnboundedSpectrum SigmaAFromConcentration(Float ce, Float cp);
-    PBRT_CPU_GPU
+    // ce: 黑色素浓度，影响头发的黑色/棕色；cp: 黄褐素浓度，影响头发的红色/黄色
+    PBRT_CPU_GPU // 从反射率计算吸收系数 sigma_a
     static SampledSpectrum SigmaAFromReflectance(const SampledSpectrum &c, Float beta_n,
                                                  const SampledWavelengths &lambda);
+    //髪の反射特性に基づいて吸収係数 sigma_a を計算します。反射率から吸収特性を逆算する際に使われます。
 
-  private:
-    // HairBxDF Constants
+  public: // HairBxDF Constants
     static constexpr int pMax = 3;
 
     // HairBxDF Private Methods
+    protected: // MorphoBSDF类 计算头发的微表面反射分布函数（光的反射由多个因素决定）
     PBRT_CPU_GPU static Float Mp(Float cosTheta_i, Float cosTheta_o, Float sinTheta_i,
                                  Float sinTheta_o, Float v) {
         Float a = cosTheta_i * cosTheta_o / v, b = sinTheta_i * sinTheta_o / v;
@@ -965,6 +978,8 @@ class HairBxDF {
         DCHECK(!IsInf(mp) && !IsNaN(mp));
         return mp;
     }
+
+    // 用于计算头发的微表面反射分布函数，涉及入射光与出射光的角度、反射的广度 v
 
     PBRT_CPU_GPU static pstd::array<SampledSpectrum, pMax + 1> Ap(Float cosTheta_o,
                                                                   Float eta, Float h,
@@ -989,10 +1004,13 @@ class HairBxDF {
 
         return ap;
     }
-
+    // 计算多次散射的衰减，模拟光在头发中的多次反射与散射
+    public:
     PBRT_CPU_GPU static inline Float Phi(int p, Float gamma_o, Float gamma_t) {
         return 2 * p * gamma_t - 2 * gamma_o + p * Pi;
     }
+
+    // 计算散射过程中光的相位变化，涉及散射次数、入射角和出射角
 
     PBRT_CPU_GPU static inline Float Np(Float phi, int p, Float s, Float gamma_o,
                                         Float gamma_t) {
@@ -1005,17 +1023,58 @@ class HairBxDF {
 
         return TrimmedLogistic(dphi, s, -Pi, Pi);
     }
+    
+    // 计算散射过程中的角度分布，控制散射的分布形状
 
-    PBRT_CPU_GPU
+    PBRT_CPU_GPU // 计算每个散射阶数的概率密度函数
     pstd::array<Float, pMax + 1> ApPDF(Float cosTheta_o) const;
 
     // HairBxDF Private Members
-    Float h, eta;
-    SampledSpectrum sigma_a;
-    Float beta_m, beta_n;
-    Float v[pMax + 1];
-    Float s;
-    Float sin2kAlpha[pMax], cos2kAlpha[pMax];
+        // HairBxDF 私有成员变量
+    protected:
+    Float h, eta;  // 高度（h）和折射率（eta）
+    SampledSpectrum sigma_a;  // 吸收系数
+    Float beta_m, beta_n;  // 微观结构参数
+    Float v[pMax + 1];  // 不同散射阶数的反射因子
+    Float s;  // 控制散射的扩散参数
+    Float sin2kAlpha[pMax], cos2kAlpha[pMax];  // 与散射角度相关的参数
+};
+
+// MorphoBSDF クラスの宣言 (HairBxDFに基づくクラス)
+    // MorphoBSDF 是基于 HairBxDF 的 BRDF（双向散射分布函数）模型，用于模拟头发材质的物理特性。
+class MorphoBSDF : public HairBxDF {
+  public:
+    MorphoBSDF() = default;  // 默认构造函数
+    MorphoBSDF(Float h, Float eta, const SampledSpectrum &sigma_a, Float beta_m, 
+               Float beta_n, Float alpha, int wavelengthIndex);
+
+    // Overriding the f() function to use BRDF table
+    PBRT_CPU_GPU // 重写 f() 函数，使用 BRDF 表来计算反射光谱，根据入射方向和出射方向计算反射光谱
+    SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode) const;
+
+    PBRT_CPU_GPU // 使用随机数 (uc, u) 来采样反射方向
+    pstd::optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u,
+                                        TransportMode mode, BxDFReflTransFlags sampleFlags) const;
+
+    PBRT_CPU_GPU // 计算特定方向的反射光的概率密度函数 (PDF)
+    Float Pdf(Vector3f wo, Vector3f wi, TransportMode mode,
+              BxDFReflTransFlags sampleFlags) const;
+
+    PBRT_CPU_GPU // 计算多重散射的概率密度函数 (PDF) 数组
+    pstd::array<Float, pMax + 1> ApPDF(Float cosTheta_o) const;
+
+    PBRT_CPU_GPU // 计算并返回基于入射方向和视线方向的 PDF 数组
+    pstd::array<Float, pMax + 1> ComputeApPdf(Float cosTheta_o, const Vector3f &wo) const;
+
+  private:
+    // MorphoBSDF Constants
+    static constexpr int pMax = 3;
+    // Private data for BRDF lookup 
+        // 用于 BRDF 查找表的私有数据
+    int wavelengthIndex; // 波长索引，用于查找不同波长的 BRDF 数据
+
+    // 使用 BRDF 查找表，根据入射角度和出射角度查找 BRDF
+    SampledSpectrum LookupBRDFTable(int it, int ot) const;
 };
 
 // MeasuredBxDF Definition
@@ -1163,6 +1222,62 @@ PBRT_CPU_GPU inline void BxDF::Regularize() {
 
 extern template class LayeredBxDF<DielectricBxDF, DiffuseBxDF, true>;
 extern template class LayeredBxDF<DielectricBxDF, ConductorBxDF, true>;
+
+/////////////////////////////////////////////////////////////////////////////////
+// General Utility Functions
+inline Float _Sqr(Float v) { return v * v; }
+template <int n>
+static Float _Pow(Float v) {
+    static_assert(n > 0, "Power can't be negative");
+    Float n2 = _Pow<n / 2>(v);
+    return n2 * n2 * _Pow<n & 1>(v);
+}
+
+template <>
+inline Float _Pow<1>(Float v) {
+    return v;
+}
+template <>
+inline Float _Pow<0>(Float v) {
+    return 1;
+}
+
+inline Float _SafeASin(Float x) {//arcsin
+    CHECK(x >= -1.0001 && x <= 1.0001);
+    return std::asin(Clamp(x, -1, 1));
+}
+
+inline Float _SafeSqrt(Float x) {
+    CHECK_GE(x, -1e-4);
+    return std::sqrt(std::max(Float(0), x));
+}
+
+// https://fgiesen.wordpress.com/2009/12/13/decoding-morton-codes/
+static uint32_t _Compact1By1(uint32_t x) {
+    // TODO: as of Haswell, the PEXT instruction could do all this in a
+    // single instruction.
+    // x = -f-e -d-c -b-a -9-8 -7-6 -5-4 -3-2 -1-0
+    x &= 0x55555555;
+    // x = --fe --dc --ba --98 --76 --54 --32 --10
+    x = (x ^ (x >> 1)) & 0x33333333;
+    // x = ---- fedc ---- ba98 ---- 7654 ---- 3210
+    x = (x ^ (x >> 2)) & 0x0f0f0f0f;
+    // x = ---- ---- fedc ba98 ---- ---- 7654 3210
+    x = (x ^ (x >> 4)) & 0x00ff00ff;
+    // x = ---- ---- ---- ---- fedc ba98 7654 3210
+    x = (x ^ (x >> 8)) & 0x0000ffff;
+    return x;
+}
+
+static Point2f _DemuxFloat(Float f) {
+    CHECK(f >= 0 && f < 1);
+    uint64_t v = f * (1ull << 32);
+    CHECK_LT(v, 0x100000000);
+    uint32_t bits[2] = {_Compact1By1(v), _Compact1By1(v >> 1)};
+    return {bits[0] / Float(1 << 16), bits[1] / Float(1 << 16)};
+}
+////////////////////////////////////////////////////////////////////////////
+
 
 }  // namespace pbrt
 

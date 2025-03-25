@@ -23,6 +23,11 @@
 #include <numeric>
 #include <string>
 
+#include <pbrt/bxdfs.h>
+
+// 引入BRDF表数据，供材质计算使用
+#include "table/brdfTable.h"
+
 namespace pbrt {
 
 std::string MaterialEvalContext::ToString() const {
@@ -181,6 +186,74 @@ HairMaterial *HairMaterial::Create(const TextureParameterDictionary &parameters,
 
     return alloc.new_object<HairMaterial>(sigma_a, reflectance, eumelanin, pheomelanin, eta,
                                           beta_m, beta_n, alpha);
+}
+
+// MorphoMaterial::Create
+std::string MorphoMaterial::ToString() const {
+    return StringPrintf("[ MorphoMaterial sigma_a: %s color: %s eumelanin: %s "
+                        "pheomelanin: %s eta: %s beta_m: %s beta_n: %s alpha: %s ]",
+                        sigma_a, color, eumelanin, pheomelanin, eta, beta_m, beta_n,
+                        alpha);
+}
+
+MorphoMaterial *MorphoMaterial::Create(const TextureParameterDictionary &parameters,
+                                       const FileLoc *loc, Allocator alloc) {
+    // 初始化 BRDF 表格 (初期使用 BRDFTABLE5_1: 多层角鳞片模型)
+    SetBRDFTable(BRDFTABLE5_1);
+    // 可以根据需要切换为其他表格：
+    // SetBRDFTable(BRDFTABLE5_2);  // 有缺失的角鳞片
+    // SetBRDFTable(BRDFTABLE5_3);  // 角鳞片剥落
+    // SetBRDFTable(BRDFTABLE5_4);  // 有缺失和剥落的角鳞片
+
+    // 黑色素浓度
+    SpectrumTexture sigma_a = 
+        parameters.GetSpectrumTextureOrNull("sigma_a", SpectrumType::Unbounded, alloc);
+    // 黄褐素浓度
+    SpectrumTexture reflectance =
+        parameters.GetSpectrumTextureOrNull("reflectance", SpectrumType::Albedo, alloc);
+
+    // 如果没有 reflectance 参数，则使用 "color" 作为 reflectance
+    if (!reflectance)
+        reflectance = parameters.GetSpectrumTextureOrNull("color", SpectrumType::Albedo, alloc);
+    FloatTexture eumelanin = parameters.GetFloatTextureOrNull("eumelanin", alloc);
+    FloatTexture pheomelanin = parameters.GetFloatTextureOrNull("pheomelanin", alloc);
+
+    // 参数验证逻辑：
+    // 如果提供了 "sigma_a" 纹理，忽略其他相关纹理参数
+    if (sigma_a) {
+        if (reflectance)
+            Warning(loc, R"(Ignoring "reflectance" parameter since "sigma_a" was provided.)");
+        if (eumelanin)
+            Warning(loc, R"(Ignoring "eumelanin" parameter since "sigma_a" was provided.)");
+        if (pheomelanin)
+            Warning(loc, R"(Ignoring "pheomelanin" parameter since "sigma_a" was provided.)");
+    } else if (reflectance) {
+        if (sigma_a)
+            Warning(loc, R"(Ignoring "sigma_a" parameter since "reflectance" was provided.)");
+        if (eumelanin)
+            Warning(loc, R"(Ignoring "eumelanin" parameter since "reflectance" was provided.)");
+        if (pheomelanin)
+            Warning(loc, R"(Ignoring "pheomelanin" parameter since "reflectance" was provided.)");
+    } else if (eumelanin || pheomelanin) {
+        if (sigma_a)
+            Warning(loc, R"(Ignoring "sigma_a" parameter since "eumelanin"/"pheomelanin" was provided.)");
+        if (reflectance)
+            Warning(loc, R"(Ignoring "reflectance" parameter since "eumelanin"/"pheomelanin" was provided.)");
+    } else {
+        // 默认值 (模拟茶色的头发)
+        sigma_a = alloc.new_object<SpectrumConstantTexture>(
+            alloc.new_object<RGBUnboundedSpectrum>(
+                MorphoBSDF::SigmaAFromConcentration(1.3, 0.0))); // 默认吸收系数
+    }
+
+    // 获取其他必要的参数（折射率、微观结构参数等）
+    FloatTexture eta = parameters.GetFloatTexture("eta", 1.55f, alloc);      // 折射率 (默认值 1.55)
+    FloatTexture beta_m = parameters.GetFloatTexture("beta_m", 0.3f, alloc); // 微观结构参数 beta_m (默认值 0.3)
+    FloatTexture beta_n = parameters.GetFloatTexture("beta_n", 0.3f, alloc); // 微观结构参数 beta_n (默认值 0.3)
+    FloatTexture alpha = parameters.GetFloatTexture("alpha", 2.f, alloc);    // 鳞片旋转控制参数 alpha (默认值 2)
+
+    return alloc.new_object<MorphoMaterial>(sigma_a, reflectance, eumelanin, pheomelanin, eta,
+                                            beta_m, beta_n, alpha);
 }
 
 // DiffuseMaterial Method Definitions
@@ -661,6 +734,8 @@ Material Material::Create(const std::string &name,
         material = MeasuredMaterial::Create(parameters, normalMap, loc, alloc);
     else if (name == "subsurface")
         material = SubsurfaceMaterial::Create(parameters, normalMap, loc, alloc);
+    else if (name == "morpho")
+        material = MorphoMaterial::Create(parameters, loc, alloc);
     else if (name == "mix") {
         std::vector<std::string> materialNames = parameters.GetStringArray("materials");
         if (materialNames.size() != 2)

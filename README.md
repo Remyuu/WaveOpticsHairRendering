@@ -7,6 +7,16 @@ A customized PBRT-v4 project for wave-optics-based hair rendering using NS-FDTD 
 
 This repository contains a customized version of [PBRT-v4](https://github.com/mmp/pbrt-v4) for wave-optics-based hair rendering, as part of my thesis. The project implements a scattering model for hair fibers based on wave optics principles, simulated using the Non-Standard Finite-Difference Time-Domain (NS-FDTD) method. It also integrates precomputed BxDF tables for efficient rendering.
 
+## You Need to check
+
+1. src\pbrt\bxdfs.cpp
+2. src\pbrt\bxdfs.h
+3. src\pbrt\materials.cpp
+4. src\pbrt\materials.h
+5. src\pbrt\base\bxdf.h
+6. src\pbrt\table (6 Files Added)
+7. src\pbrt\util\spectrum.h
+
 ## Platform
 
 Tested on macOS only.

@@ -19,7 +19,7 @@ This repository contains a customized version of [PBRT-v4](https://github.com/mm
 
 ## Platform
 
-Tested on macOS only.
+Tested on macOS only. (Only CPU, `--gpu` mode is unsupported yet)
 
 ## Third-Party Libraries
 

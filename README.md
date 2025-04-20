@@ -1,6 +1,7 @@
 # WaveOpticsHairRendering
 
 > Actually its not "Ours".
+> 
 <img width="820" alt="image" src="https://github.com/user-attachments/assets/eab2a0a1-d247-41e8-b3e5-7ced80a55645" />
 
 A customized PBRT-v4 project for wave-optics-based hair rendering using NS-FDTD simulation and precomputed BxDF tables.
